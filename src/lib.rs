@@ -144,8 +144,8 @@ impl Granny2 {
                 let virtual_src = offset + rellocation.src_offset;
                 let virtual_dst = section_offsets[rellocation.dst_section] + rellocation.dst_offset;
 
-                decompressed_data[virtual_src..(virtual_src + size_of::<usize>())]
-                    .swap_with_slice(&mut virtual_dst.to_le_bytes());
+                decompressed_data[virtual_src..(virtual_src + 4)]
+                    .swap_with_slice(&mut virtual_dst.to_le_bytes()[0..4]);
             }
         }
 
