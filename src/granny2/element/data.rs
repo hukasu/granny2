@@ -12,6 +12,9 @@ pub enum Data {
     Real32(f32),
     Transform(Transform),
     String(Box<str>),
+    Array(u64, u64),
     Reference(u64),
-    Array(u64),
+    ArrayOfReferences(Vec<u64>),
+    Variant(u64, u64),
+    VariantArray(u64, u64, u64),
 }

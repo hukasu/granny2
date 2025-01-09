@@ -8,7 +8,11 @@ use std::{
     io::{BufRead, Seek},
 };
 
-pub use self::{data::Data, info::Info, type_id::TypeId};
+pub use self::{
+    data::Data,
+    info::{Info, InfoError},
+    type_id::TypeId,
+};
 
 #[derive(Debug)]
 pub struct Element {
@@ -16,7 +20,7 @@ pub struct Element {
     pub name: Box<str>,
     pub children: Vec<Element>,
     pub size: usize,
-    pub data: Data,
+    pub data: Vec<Data>,
 }
 
 impl Element {
@@ -43,7 +47,7 @@ impl Element {
     ) -> Result<Self, ElementError> {
         let name = info.read_name(reader)?;
 
-        let size = info.array_size().ok_or(ElementError::InvalidArraySize)?;
+        let size = info.array_size;
 
         let data = info.read_data(reader)?;
 
@@ -61,22 +65,31 @@ impl Element {
     fn read_children<T: BufRead + Seek>(
         reader: &mut T,
         info: &Info,
-        data: &Data,
+        data: &[Data],
     ) -> Result<Vec<Element>, ElementError> {
         let rewind_pos = reader.stream_position()?;
 
         let children = match (info.element_type, data) {
-            (
-                TypeId::Reference | TypeId::VariantReference | TypeId::EmptyReference,
-                Data::Reference(ref_pos),
-            ) if *ref_pos != 0 => Self::parse(reader, info.children_offset, *ref_pos)?,
-            // Data::Array(array_pos) => {
-            //     if *array_pos != 0 {
-            //         Self::parse(reader, info.children_offset, 0)?
-            //     } else {
-            //         vec![]
-            //     }
+            (TypeId::Reference | TypeId::EmptyReference, [Data::Reference(ref_pos)])
+                if *ref_pos != 0 =>
+            {
+                Self::parse(reader, info.children_offset, *ref_pos)?
+            }
+            (TypeId::ArrayOfReferences, [Data::ArrayOfReferences(references)]) => {
+                let mut children = vec![];
+
+                for reference in references {
+                    children.extend(Self::parse(reader, info.children_offset, *reference)?);
+                }
+
+                children
+            }
+            // (TypeId::ReferenceToArray, Data::Array(size, pos)) if *size != 0 => {
+            //     Self::parse(reader, info.children_offset, *pos)?
             // }
+            (TypeId::Inline, [Data::Empty]) => {
+                Self::parse(reader, info.children_offset, rewind_pos)?
+            }
             _ => vec![],
         };
 
@@ -89,7 +102,7 @@ impl Element {
 #[derive(Debug)]
 pub enum ElementError {
     InvalidType,
-    InvalidArraySize,
+    Info,
     Io,
 }
 
@@ -97,7 +110,7 @@ impl Display for ElementError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidType => write!(f, "Couldn't create an element from type info."),
-            Self::InvalidArraySize => write!(f, "Type info had invalid array size."),
+            Self::Info => write!(f, "An error occurred while reading Element's Info."),
             Self::Io => write!(f, "Couldn't parse elements due to Io error."),
         }
     }
@@ -109,5 +122,12 @@ impl From<std::io::Error> for ElementError {
     fn from(value: std::io::Error) -> Self {
         log::error!("{}", value);
         Self::Io
+    }
+}
+
+impl From<InfoError> for ElementError {
+    fn from(value: InfoError) -> Self {
+        log::error!("{}", value);
+        Self::Info
     }
 }
