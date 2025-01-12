@@ -123,7 +123,7 @@ impl Element {
                 vec![]
             }
             (TypeId::VariantReference, [Data::Variant(offset, data)]) => {
-                Self::parse(reader, info.children_offset + offset, *data)?
+                Self::parse(reader, *offset, *data)?
             }
             (TypeId::VariantReference, _) => {
                 unreachable!("VariantReference should always be paired with Variant.");
@@ -136,7 +136,7 @@ impl Element {
 
                 let mut pos = *data;
                 for i in 0..*size {
-                    let child = Self::parse(reader, info.children_offset + offset, pos)?;
+                    let child = Self::parse(reader, *offset, pos)?;
 
                     children.push(Element {
                         info: info.clone(),
