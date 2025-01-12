@@ -29,15 +29,11 @@ impl Element {
         types_pos: u64,
         object_pos: u64,
     ) -> Result<Vec<Self>, ElementError> {
-        let rewind_pos = reader.stream_position()?;
-
         reader.seek(std::io::SeekFrom::Start(object_pos))?;
         let mut elements = Vec::new();
         for type_info in Info::parse(reader, types_pos)? {
             elements.push(Element::parse_single(reader, type_info)?);
         }
-
-        reader.seek(std::io::SeekFrom::Start(rewind_pos))?;
         Ok(elements)
     }
 
@@ -70,25 +66,98 @@ impl Element {
         let rewind_pos = reader.stream_position()?;
 
         let children = match (info.element_type, data) {
-            (TypeId::Reference | TypeId::EmptyReference, [Data::Reference(ref_pos)])
-                if *ref_pos != 0 =>
-            {
+            (TypeId::Reference | TypeId::EmptyReference, [Data::Reference(0)]) => vec![],
+            (TypeId::Reference | TypeId::EmptyReference, [Data::Reference(ref_pos)]) => {
                 Self::parse(reader, info.children_offset, *ref_pos)?
+            }
+            (TypeId::Reference, _) => {
+                unreachable!("Reference should always be paired with Reference.");
+            }
+            (TypeId::EmptyReference, _) => {
+                unreachable!("EmptyReference should always be paired with Reference.");
             }
             (TypeId::ArrayOfReferences, [Data::ArrayOfReferences(references)]) => {
                 let mut children = vec![];
 
-                for reference in references {
-                    children.extend(Self::parse(reader, info.children_offset, *reference)?);
+                for (i, reference) in references.iter().enumerate() {
+                    let child = Self::parse(reader, info.children_offset, *reference)?;
+                    children.push(Element {
+                        info: info.clone(),
+                        name: i.to_string().into_boxed_str(),
+                        children: child,
+                        size: 1,
+                        data: vec![],
+                    });
                 }
 
                 children
             }
-            // (TypeId::ReferenceToArray, Data::Array(size, pos)) if *size != 0 => {
-            //     Self::parse(reader, info.children_offset, *pos)?
-            // }
+            (TypeId::ArrayOfReferences, _) => {
+                unreachable!("ArrayOfReferences should always be paired with ArrayOfReferences.");
+            }
+            (TypeId::ReferenceToArray, [Data::Array(0, _)]) => {
+                vec![]
+            }
+            (TypeId::ReferenceToArray, [Data::Array(size, pos)]) => {
+                let mut children = vec![];
+
+                let mut pos = *pos;
+                for i in 0..*size {
+                    let child = Self::parse(reader, info.children_offset, pos)?;
+                    children.push(Element {
+                        info: info.clone(),
+                        name: i.to_string().into_boxed_str(),
+                        children: child,
+                        size: 1,
+                        data: vec![],
+                    });
+                    pos = reader.stream_position()?;
+                }
+
+                children
+            }
+            (TypeId::ReferenceToArray, _) => {
+                unreachable!("ReferenceToArray should always be paired with Array.");
+            }
+            (TypeId::VariantReference, [Data::Variant(0, _)]) => {
+                vec![]
+            }
+            (TypeId::VariantReference, [Data::Variant(offset, data)]) => {
+                Self::parse(reader, info.children_offset + offset, *data)?
+            }
+            (TypeId::VariantReference, _) => {
+                unreachable!("VariantReference should always be paired with Variant.");
+            }
+            (TypeId::ReferenceToVariantArray, [Data::VariantArray(0, _, _)]) => {
+                vec![]
+            }
+            (TypeId::ReferenceToVariantArray, [Data::VariantArray(size, offset, data)]) => {
+                let mut children = vec![];
+
+                let mut pos = *data;
+                for i in 0..*size {
+                    let child = Self::parse(reader, info.children_offset + offset, pos)?;
+
+                    children.push(Element {
+                        info: info.clone(),
+                        name: i.to_string().into_boxed_str(),
+                        children: child,
+                        size: 1,
+                        data: vec![],
+                    });
+                    pos = reader.stream_position()?;
+                }
+
+                children
+            }
+            (TypeId::ReferenceToVariantArray, _) => {
+                unreachable!("ReferenceToVariantArray should always be paired with VariantArray.");
+            }
             (TypeId::Inline, [Data::Empty]) => {
                 Self::parse(reader, info.children_offset, rewind_pos)?
+            }
+            (TypeId::Inline, _) => {
+                unreachable!("Inline should always be paired with Empty.");
             }
             _ => vec![],
         };

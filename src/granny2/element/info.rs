@@ -7,7 +7,7 @@ use crate::granny2::transform::Transform;
 
 use super::{type_id::TypeId, Data};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Info {
     pub element_type: TypeId,
     name_offset: u64,
@@ -45,6 +45,14 @@ impl Info {
                 reader.read_exact(&mut buffer[0..4])?;
                 u64::from_le_bytes(buffer)
             };
+
+            if matches!(
+                element_type,
+                TypeId::VariantReference | TypeId::ReferenceToVariantArray
+            ) && children_offset != 0
+            {
+                return Err(InfoError::InvalidChildrenOffsetForVariant);
+            }
 
             let array_size = {
                 let mut buffer = [0; 8];
@@ -245,6 +253,7 @@ impl Info {
 
 pub enum InfoError {
     InvalidArraySize,
+    InvalidChildrenOffsetForVariant,
     Io,
 }
 
@@ -259,6 +268,9 @@ impl Display for InfoError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidArraySize => write!(f, "Info had invalid array size."),
+            Self::InvalidChildrenOffsetForVariant => {
+                write!(f, "Children Offset should be zero for Variants")
+            }
             Self::Io => write!(f, "Couldn't read info due to Io error."),
         }
     }
